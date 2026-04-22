@@ -1,0 +1,152 @@
+import { useQuery } from '@tanstack/react-query';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import ercotApi from '../services/ercotApi';
+import StatCard from '../components/StatCard';
+import Card from '../components/Card';
+import LoadingSpinner from '../components/LoadingSpinner';
+import ErrorMessage from '../components/ErrorMessage';
+
+const COLORS = ['#3182ce', '#38a169', '#d69e2e', '#e53e3e', '#805ad5', '#718096'];
+
+function Home() {
+  const { data: conditions, isLoading: conditionsLoading, error: conditionsError } = useQuery({
+    queryKey: ['systemConditions'],
+    queryFn: ercotApi.getCurrentConditions,
+    refetchInterval: 60000, // Refresh every minute
+  });
+
+  const { data: fuelMix, isLoading: fuelLoading } = useQuery({
+    queryKey: ['fuelMix'],
+    queryFn: ercotApi.getGenerationByFuel,
+    refetchInterval: 300000, // Refresh every 5 minutes
+  });
+
+  const { data: prices, isLoading: pricesLoading } = useQuery({
+    queryKey: ['realTimePrices'],
+    queryFn: ercotApi.getRealTimePrices,
+    refetchInterval: 60000,
+  });
+
+  if (conditionsLoading) return <LoadingSpinner />;
+  if (conditionsError) return <ErrorMessage message={conditionsError.message} />;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">Dashboard Overview</h1>
+        <p className="text-slate-500">Real-time ERCOT grid conditions and market data</p>
+      </div>
+
+      {/* Key Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          title="System Load"
+          value={Math.round(conditions?.systemLoad || 0)}
+          unit="MW"
+          trend="+2.3% from yesterday"
+          trendDirection="up"
+          icon="📊"
+        />
+        <StatCard
+          title="Total Generation"
+          value={Math.round(conditions?.totalGeneration || 0)}
+          unit="MW"
+          icon="⚡"
+        />
+        <StatCard
+          title="Wind Output"
+          value={Math.round(conditions?.windOutput || 0)}
+          unit="MW"
+          trend="18% of total"
+          icon="💨"
+        />
+        <StatCard
+          title="Grid Frequency"
+          value={conditions?.frequency?.toFixed(3) || '60.000'}
+          unit="Hz"
+          icon="〰️"
+        />
+      </div>
+
+      {/* Charts Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Fuel Mix Pie Chart */}
+        <Card title="Current Generation by Fuel Type">
+          {fuelLoading ? (
+            <LoadingSpinner size="sm" />
+          ) : (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={fuelMix?.fuels || []}
+                    dataKey="mw"
+                    nameKey="type"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={80}
+                    label={({ type, percentage }) => `${type}: ${percentage}%`}
+                  >
+                    {(fuelMix?.fuels || []).map((_, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value) => `${value.toLocaleString()} MW`} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Card>
+
+        {/* Price Summary */}
+        <Card title="Real-Time Prices by Zone">
+          {pricesLoading ? (
+            <LoadingSpinner size="sm" />
+          ) : (
+            <div className="space-y-4">
+              {(prices?.prices || []).map((zone, index) => (
+                <div key={zone.zone} className="flex items-center justify-between p-3 bg-slate-50 rounded">
+                  <div className="flex items-center">
+                    <div 
+                      className="w-3 h-3 rounded-full mr-3"
+                      style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                    />
+                    <span className="font-medium">{zone.zone.replace('LZ_', '')}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-lg font-bold">${zone.price.toFixed(2)}</span>
+                    <span className="text-sm text-slate-500">/MWh</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* Quick Links */}
+      <Card title="Quick Actions">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <a href="/real-time-prices" className="p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors text-center">
+            <span className="text-2xl">💰</span>
+            <p className="text-sm font-medium mt-2">View Prices</p>
+          </a>
+          <a href="/generation-by-fuel" className="p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors text-center">
+            <span className="text-2xl">⚡</span>
+            <p className="text-sm font-medium mt-2">Generation Mix</p>
+          </a>
+          <a href="/load-forecast" className="p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors text-center">
+            <span className="text-2xl">📈</span>
+            <p className="text-sm font-medium mt-2">Load Forecast</p>
+          </a>
+          <a href="/emergency-alerts" className="p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors text-center">
+            <span className="text-2xl">🚨</span>
+            <p className="text-sm font-medium mt-2">Alerts</p>
+          </a>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+export default Home;
