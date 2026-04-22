@@ -9,7 +9,7 @@ import ErrorMessage from '../components/ErrorMessage';
 const COLORS = ['#3182ce', '#38a169', '#d69e2e', '#e53e3e', '#805ad5', '#718096'];
 
 function Home() {
-  const { data: conditions, isLoading: conditionsLoading, error: conditionsError } = useQuery({
+  const { data: conditions, isLoading: conditionsLoading, error: conditionsError, refetch: refetchConditions } = useQuery({
     queryKey: ['systemConditions'],
     queryFn: ercotApi.getCurrentConditions,
     refetchInterval: 60000, // Refresh every minute
@@ -28,7 +28,7 @@ function Home() {
   });
 
   if (conditionsLoading) return <LoadingSpinner />;
-  if (conditionsError) return <ErrorMessage message={conditionsError.message} />;
+  if (conditionsError) return <ErrorMessage message={conditionsError.message} error={conditionsError} onRetry={refetchConditions} />;
 
   return (
     <div className="space-y-6">

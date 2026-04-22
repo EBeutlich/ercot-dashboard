@@ -3,17 +3,19 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Ba
 import ercotApi from '../services/ercotApi';
 import Card from '../components/Card';
 import LoadingSpinner from '../components/LoadingSpinner';
+import ErrorMessage from '../components/ErrorMessage';
 
 const COLORS = ['#3182ce', '#38a169', '#718096', '#d69e2e', '#e53e3e', '#805ad5'];
 
 function GenerationByFuel() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['fuelMix'],
     queryFn: ercotApi.getGenerationByFuel,
     refetchInterval: 300000,
   });
 
   if (isLoading) return <LoadingSpinner />;
+  if (error) return <ErrorMessage message={error.message} error={error} onRetry={refetch} />;
 
   const fuels = data?.fuels || [];
 

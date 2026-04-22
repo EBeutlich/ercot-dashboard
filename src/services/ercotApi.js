@@ -91,117 +91,68 @@ export const ercotApi = {
   },
 };
 
+// Custom error class for better error information
+export class ErcotApiError extends Error {
+  constructor(message, originalError) {
+    super(message);
+    this.name = 'ErcotApiError';
+    this.code = originalError?.code;
+    this.response = originalError?.response;
+    this.config = originalError?.config;
+    this.isNetworkError = originalError?.code === 'ERR_NETWORK' || originalError?.message === 'Network Error';
+    this.isTimeout = originalError?.code === 'ECONNABORTED' || originalError?.code === 'ERR_TIMEOUT';
+  }
+}
+
 // Helper function to fetch ERCOT data
 async function fetchErcotData(endpoint) {
   try {
-    // Note: ERCOT public API may have CORS restrictions
-    // In production, you might need a proxy server or use AWS Lambda
     const response = await apiClient.get(`${ERCOT_API_BASE}/${endpoint}`);
     return response.data;
   } catch (error) {
-    console.error(`Error fetching ${endpoint}:`, error);
-    // Return mock data for development
-    return getMockData(endpoint);
+    const errorMessage = getErrorMessage(error);
+    const apiError = new ErcotApiError(errorMessage, error);
+    throw apiError;
   }
+}
+
+// Generate user-friendly error messages
+function getErrorMessage(error) {
+  if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') {
+    return 'Network error: Unable to connect to ERCOT API';
+  }
+  if (error.code === 'ECONNABORTED' || error.code === 'ERR_TIMEOUT') {
+    return 'Request timeout: ERCOT API is not responding';
+  }
+  if (error.response) {
+    const status = error.response.status;
+    if (status === 404) return 'Data not found on ERCOT API';
+    if (status === 429) return 'Rate limited: Too many requests to ERCOT API';
+    if (status >= 500) return 'ERCOT API server error';
+    return `ERCOT API error (HTTP ${status})`;
+  }
+  return error.message || 'Unknown error occurred';
 }
 
 // Parse HTML response for system conditions
 function parseSystemConditions(html) {
-  // This would parse the HTML response in production
-  // For now, return mock data
-  return getMockData('real_time_system_conditions');
-}
-
-// Mock data for development and fallback
-function getMockData(endpoint) {
-  const mockDataMap = {
-    'real_time_system_conditions': {
-      timestamp: new Date().toISOString(),
-      systemLoad: 45000 + Math.random() * 10000,
-      totalGeneration: 46000 + Math.random() * 10000,
-      windOutput: 8000 + Math.random() * 5000,
-      solarOutput: 3000 + Math.random() * 4000,
-      frequency: 60.0 + (Math.random() - 0.5) * 0.1,
-    },
-    'real_time_spp': generatePricingData(),
-    'dam_spp': generatePricingData(),
-    'hub_prices': {
-      hubs: [
-        { name: 'HB_HOUSTON', price: 25 + Math.random() * 50 },
-        { name: 'HB_NORTH', price: 25 + Math.random() * 50 },
-        { name: 'HB_SOUTH', price: 25 + Math.random() * 50 },
-        { name: 'HB_WEST', price: 25 + Math.random() * 50 },
-      ]
-    },
-    'fuel_mix': {
-      timestamp: new Date().toISOString(),
-      fuels: [
-        { type: 'Natural Gas', mw: 25000 + Math.random() * 5000, percentage: 45 },
-        { type: 'Wind', mw: 15000 + Math.random() * 5000, percentage: 27 },
-        { type: 'Coal', mw: 5000 + Math.random() * 2000, percentage: 10 },
-        { type: 'Nuclear', mw: 5000 + Math.random() * 500, percentage: 9 },
-        { type: 'Solar', mw: 4000 + Math.random() * 3000, percentage: 7 },
-        { type: 'Other', mw: 1000 + Math.random() * 500, percentage: 2 },
-      ]
-    },
-    'wind_generation': generateTimeSeriesData('Wind', 15000, 5000),
-    'solar_generation': generateTimeSeriesData('Solar', 5000, 4000),
-    'load_forecast': {
-      current: 45000 + Math.random() * 10000,
-      forecast: Array.from({ length: 24 }, (_, i) => ({
-        hour: i,
-        load: 40000 + Math.sin(i / 24 * Math.PI * 2) * 10000 + Math.random() * 2000
-      }))
-    },
-    'outage_schedule': {
-      planned: Array.from({ length: 5 }, (_, i) => ({
-        id: `OUT-${1000 + i}`,
-        resource: `Generator ${i + 1}`,
-        startDate: new Date(Date.now() + i * 86400000).toISOString(),
-        endDate: new Date(Date.now() + (i + 2) * 86400000).toISOString(),
-        capacity: 200 + Math.random() * 300,
-        type: ['Maintenance', 'Inspection', 'Upgrade'][i % 3]
-      }))
-    },
-    'emergency_alerts': {
-      alerts: [
-        { level: 'Normal', message: 'Grid operating normally', timestamp: new Date().toISOString() }
-      ]
-    },
-    'market_notices': {
-      notices: Array.from({ length: 5 }, (_, i) => ({
-        id: `MN-${2000 + i}`,
-        title: `Market Notice ${i + 1}`,
-        timestamp: new Date(Date.now() - i * 3600000).toISOString(),
-        category: ['Operations', 'Settlements', 'Planning'][i % 3]
-      }))
-    }
+  // Parse the HTML response to extract system conditions data
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  
+  // Extract values from the HTML structure
+  const getValue = (selector) => {
+    const el = doc.querySelector(selector);
+    return el ? parseFloat(el.textContent.replace(/[^0-9.-]/g, '')) : null;
   };
 
-  return mockDataMap[endpoint] || { data: [], message: 'No data available' };
-}
-
-function generatePricingData() {
-  const zones = ['LZ_HOUSTON', 'LZ_NORTH', 'LZ_SOUTH', 'LZ_WEST'];
   return {
     timestamp: new Date().toISOString(),
-    prices: zones.map(zone => ({
-      zone,
-      price: 20 + Math.random() * 60,
-      congestion: Math.random() * 10 - 5,
-      loss: Math.random() * 2
-    }))
-  };
-}
-
-function generateTimeSeriesData(type, base, variance) {
-  return {
-    type,
-    current: base + Math.random() * variance,
-    hourly: Array.from({ length: 24 }, (_, i) => ({
-      hour: i,
-      value: base + Math.sin(i / 24 * Math.PI * 2) * variance * 0.5 + Math.random() * variance * 0.3
-    }))
+    systemLoad: getValue('.systemLoad') || getValue('[data-field="systemLoad"]'),
+    totalGeneration: getValue('.totalGeneration') || getValue('[data-field="totalGeneration"]'),
+    windOutput: getValue('.windOutput') || getValue('[data-field="windOutput"]'),
+    solarOutput: getValue('.solarOutput') || getValue('[data-field="solarOutput"]'),
+    frequency: getValue('.frequency') || getValue('[data-field="frequency"]'),
   };
 }
 

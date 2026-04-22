@@ -3,15 +3,17 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import ercotApi from '../services/ercotApi';
 import Card from '../components/Card';
 import LoadingSpinner from '../components/LoadingSpinner';
+import ErrorMessage from '../components/ErrorMessage';
 
 function RealTimePrices() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['realTimePrices'],
     queryFn: ercotApi.getRealTimePrices,
     refetchInterval: 60000,
   });
 
   if (isLoading) return <LoadingSpinner />;
+  if (error) return <ErrorMessage message={error.message} error={error} onRetry={refetch} />;
 
   const chartData = (data?.prices || []).map(p => ({
     zone: p.zone.replace('LZ_', ''),
