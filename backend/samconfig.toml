@@ -1,0 +1,11 @@
+# SAM CLI configuration - used for `sam deploy` without --guided
+# Edit these values for your environment
+
+version = 0.1
+[default.deploy.parameters]
+stack_name = "ercot-api-proxy"
+resolve_s3 = true
+s3_prefix = "ercot-api-proxy"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true

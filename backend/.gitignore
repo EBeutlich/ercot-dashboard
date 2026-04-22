@@ -1,0 +1,12 @@
+# Dependencies
+node_modules/
+
+# SAM build artifacts
+.aws-sam/
+
+# Environment files
+.env
+
+# OS files
+.DS_Store
+Thumbs.db

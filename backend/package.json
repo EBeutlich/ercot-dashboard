@@ -1,0 +1,15 @@
+{
+  "name": "ercot-api-proxy",
+  "version": "1.0.0",
+  "description": "Lambda proxy for ERCOT Public API",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "deploy": "sam deploy --guided",
+    "build": "sam build"
+  },
+  "dependencies": {
+    "@aws-sdk/client-ssm": "^3.600.0",
+    "axios": "^1.7.0"
+  }
+}

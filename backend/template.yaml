@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: ERCOT API Proxy Lambda - Securely proxies requests to ERCOT Public API
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: nodejs20.x
+    MemorySize: 256
+
+Parameters:
+  AllowedOrigin:
+    Type: String
+    Default: '*'
+    Description: CORS allowed origin (set to your Amplify domain for production)
+
+Resources:
+  # Lambda Function
+  ErcotApiProxyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ercot-api-proxy
+      Handler: index.handler
+      CodeUri: .
+      Description: Proxies requests to ERCOT Public API with secure credential storage
+      Environment:
+        Variables:
+          ALLOWED_ORIGIN: !Ref AllowedOrigin
+      Policies:
+        # Permission to read SSM parameters
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameters
+                - ssm:GetParameter
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ercot/*'
+      Events:
+        # Catch-all API Gateway route
+        ApiProxy:
+          Type: Api
+          Properties:
+            Path: /api/{proxy+}
+            Method: GET
+            RestApiId: !Ref ErcotApi
+        # CORS preflight
+        ApiProxyOptions:
+          Type: Api
+          Properties:
+            Path: /api/{proxy+}
+            Method: OPTIONS
+            RestApiId: !Ref ErcotApi
+        # Root endpoint
+        ApiRoot:
+          Type: Api
+          Properties:
+            Path: /api
+            Method: GET
+            RestApiId: !Ref ErcotApi
+
+  # API Gateway
+  ErcotApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: ercot-api
+      StageName: prod
+      Cors:
+        AllowMethods: "'GET, OPTIONS'"
+        AllowHeaders: "'Content-Type'"
+        AllowOrigin: "'*'"
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${ErcotApi}.execute-api.${AWS::Region}.amazonaws.com/prod/api'
+    Export:
+      Name: ErcotApiEndpoint
+  
+  FunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt ErcotApiProxyFunction.Arn
