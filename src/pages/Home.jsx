@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine } from 'recharts';
 import ercotApi from '../services/ercotApi';
 import StatCard from '../components/StatCard';
 import Card from '../components/Card';
@@ -103,23 +103,51 @@ function Home() {
           {pricesLoading ? (
             <LoadingSpinner size="sm" />
           ) : (
-            <div className="space-y-4">
-              {(prices?.prices || []).map((zone, index) => (
-                <div key={zone.zone} className="flex items-center justify-between p-3 bg-slate-50 rounded">
-                  <div className="flex items-center">
-                    <div 
-                      className="w-3 h-3 rounded-full mr-3"
-                      style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                    />
-                    <span className="font-medium">{zone.zone.replace('LZ_', '')}</span>
+            (() => {
+              const priceValues = (prices?.prices || []).map(p => p.price);
+              const min = Math.min(...priceValues);
+              const max = Math.max(...priceValues);
+              const avg = priceValues.reduce((a, b) => a + b, 0) / priceValues.length;
+              return (
+                <div className="space-y-4">
+                  {/* Compact Horizontal Bar Chart */}
+                  <div className="h-48">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart 
+                        data={(prices?.prices || []).map(p => ({
+                          zone: p.name.replace('LZ_', '').replace('HB_', ''),
+                          price: p.price
+                        }))}
+                        layout="vertical"
+                        margin={{ top: 5, right: 30, left: 50, bottom: 5 }}
+                      >
+                        <XAxis type="number" tickFormatter={(v) => `$${v}`} domain={['auto', 'auto']} />
+                        <YAxis type="category" dataKey="zone" tick={{ fontSize: 11 }} width={50} />
+                        <Tooltip formatter={(v) => `$${v.toFixed(2)}/MWh`} />
+                        <ReferenceLine x={avg} stroke="#e53e3e" strokeWidth={2} strokeDasharray="4 4" label={{ value: 'Avg', position: 'top', fill: '#e53e3e', fontSize: 10 }} />
+                        <Bar dataKey="price" fill="#3182ce" radius={[0, 4, 4, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
                   </div>
-                  <div className="text-right">
-                    <span className="text-lg font-bold">${zone.price.toFixed(2)}</span>
-                    <span className="text-sm text-slate-500">/MWh</span>
+                  
+                  {/* Stats Summary */}
+                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200">
+                    <div className="text-center">
+                      <span className="text-xs text-slate-500 uppercase">Min</span>
+                      <p className="text-lg font-bold text-red-600">${min.toFixed(2)}</p>
+                    </div>
+                    <div className="text-center">
+                      <span className="text-xs text-slate-500 uppercase">Avg</span>
+                      <p className="text-lg font-bold text-slate-700">${avg.toFixed(2)}</p>
+                    </div>
+                    <div className="text-center">
+                      <span className="text-xs text-slate-500 uppercase">Max</span>
+                      <p className="text-lg font-bold text-green-600">${max.toFixed(2)}</p>
+                    </div>
                   </div>
                 </div>
-              ))}
-            </div>
+              );
+            })()
           )}
         </Card>
       </div>

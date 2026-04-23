@@ -152,7 +152,18 @@ export const ercotApi = {
   async getRealTimePrices() {
     if (hasLambdaApi()) {
       try {
-        return await fetchFromLambda('real-time-prices');
+        const data = await fetchFromLambda('real-time-prices');
+        // Validate data format - should have prices array
+        if (data && Array.isArray(data.prices) && data.prices.length > 0) {
+          return data;
+        }
+        // Try parsing as CSV if Lambda returned raw string
+        if (typeof data === 'string') {
+          const parsed = parseSettlementPricesCsv(data);
+          if (parsed) return parsed;
+        }
+        // Data format invalid, fall through to fallback
+        fallbackNotifier.notify({ message: 'Invalid data format from Lambda', endpoint: 'real-time-prices' });
       } catch (err) {
         fallbackNotifier.notify({ message: err.message || 'Lambda API failed', endpoint: 'real-time-prices' });
       }
@@ -170,7 +181,18 @@ export const ercotApi = {
   async getDayAheadPrices() {
     if (hasLambdaApi()) {
       try {
-        return await fetchFromLambda('day-ahead-prices');
+        const data = await fetchFromLambda('day-ahead-prices');
+        // Validate data format - should have prices array
+        if (data && Array.isArray(data.prices) && data.prices.length > 0) {
+          return data;
+        }
+        // Try parsing as CSV if Lambda returned raw string
+        if (typeof data === 'string') {
+          const parsed = parseSettlementPricesCsv(data);
+          if (parsed) return parsed;
+        }
+        // Data format invalid, fall through to fallback
+        fallbackNotifier.notify({ message: 'Invalid data format from Lambda', endpoint: 'day-ahead-prices' });
       } catch (err) {
         fallbackNotifier.notify({ message: err.message || 'Lambda API failed', endpoint: 'day-ahead-prices' });
       }
@@ -413,6 +435,51 @@ function getErrorMessage(error) {
     return `HTTP ${status}`;
   }
   return error.message || 'Unknown error';
+}
+
+// Parse settlement point prices from CSV (for raw Lambda response)
+function parseSettlementPricesCsv(csvData) {
+  if (typeof csvData !== 'string') return null;
+  
+  const lines = csvData.split('\n').filter(line => line.trim());
+  if (lines.length < 2) return null;
+  
+  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+  
+  // Find column indices
+  const nameIdx = headers.findIndex(h => 
+    h.includes('SettlementPoint') || h.includes('settlement_point') || h === 'name' || h === 'SPName'
+  );
+  const priceIdx = headers.findIndex(h => 
+    h.includes('Price') || h.includes('price') || h === 'LMP' || h === 'SPP'
+  );
+  
+  // Fallback indices
+  const effectiveNameIdx = nameIdx >= 0 ? nameIdx : 3;
+  const effectivePriceIdx = priceIdx >= 0 ? priceIdx : 4;
+  
+  const pricesMap = new Map();
+  
+  for (let i = 1; i < lines.length; i++) {
+    const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+    const name = values[effectiveNameIdx];
+    const price = parseFloat(values[effectivePriceIdx]);
+    
+    if (name && !Number.isNaN(price)) {
+      pricesMap.set(name, price);
+    }
+  }
+  
+  const prices = Array.from(pricesMap.entries())
+    .filter(([name]) => name.startsWith('LZ_') || name.startsWith('HB_'))
+    .map(([name, price]) => ({ name, price }));
+  
+  if (prices.length === 0) return null;
+  
+  return {
+    timestamp: new Date().toISOString(),
+    prices,
+  };
 }
 
 // Shared HTML parsing utilities

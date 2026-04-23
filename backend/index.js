@@ -256,6 +256,51 @@ function parseFuelMixCsv(csvData) {
   };
 }
 
+// Parse CSV data for real-time settlement point prices
+function parseSettlementPricesCsv(csvData) {
+  const lines = csvData.split('\n').filter(line => line.trim());
+  if (lines.length < 2) return { timestamp: new Date().toISOString(), prices: [] };
+  
+  // Parse headers
+  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+  
+  // Find column indices
+  const nameIdx = headers.findIndex(h => 
+    h.includes('SettlementPoint') || h.includes('settlement_point') || h === 'name' || h === 'SPName'
+  );
+  const priceIdx = headers.findIndex(h => 
+    h.includes('Price') || h.includes('price') || h === 'LMP' || h === 'SPP'
+  );
+  
+  // Fallback indices if headers don't match expected patterns
+  const effectiveNameIdx = nameIdx >= 0 ? nameIdx : 3;
+  const effectivePriceIdx = priceIdx >= 0 ? priceIdx : 4;
+  
+  // Parse all rows (skip header)
+  const pricesMap = new Map();
+  
+  for (let i = 1; i < lines.length; i++) {
+    const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+    const name = values[effectiveNameIdx];
+    const price = parseFloat(values[effectivePriceIdx]);
+    
+    if (name && !Number.isNaN(price)) {
+      // Keep most recent price per settlement point (last row wins)
+      pricesMap.set(name, price);
+    }
+  }
+  
+  // Filter to only include load zone and hub prices for the summary
+  const prices = Array.from(pricesMap.entries())
+    .filter(([name]) => name.startsWith('LZ_') || name.startsWith('HB_'))
+    .map(([name, price]) => ({ name, price }));
+  
+  return {
+    timestamp: new Date().toISOString(),
+    prices,
+  };
+}
+
 // Fetch real-time system conditions from ERCOT CDR (fallback for real-time data)
 async function fetchRealTimeConditions() {
   const response = await axios.get('https://www.ercot.com/content/cdr/html/real_time_system_conditions.html', {
@@ -353,6 +398,37 @@ async function fetchFuelMixHtml() {
   };
 }
 
+// Fetch real-time prices from ERCOT CDR HTML page (server-side, no CORS issues)
+async function fetchRealTimePricesHtml() {
+  const response = await axios.get('https://www.ercot.com/content/cdr/html/real_time_spp.html', {
+    timeout: 10000,
+  });
+  
+  const html = response.data;
+  const prices = [];
+  
+  // Parse HTML table rows to extract settlement point prices
+  // Pattern: <tr><td>SettlementPointName</td><td>Price</td>...</tr>
+  const rowRegex = /<tr[^>]*>\s*<td[^>]*>([^<]+)<\/td>\s*<td[^>]*>([^<]+)<\/td>/gi;
+  let match;
+  
+  while ((match = rowRegex.exec(html)) !== null) {
+    const name = match[1].trim();
+    const priceStr = match[2].trim().replace(/[^0-9.\-]/g, '');
+    const price = parseFloat(priceStr);
+    
+    // Only include load zones and hubs (filter out headers and other rows)
+    if (name && !isNaN(price) && (name.startsWith('LZ_') || name.startsWith('HB_'))) {
+      prices.push({ name, price });
+    }
+  }
+  
+  return {
+    timestamp: new Date().toISOString(),
+    prices,
+  };
+}
+
 // CORS headers
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -414,12 +490,20 @@ export const handler = async (event) => {
       
       case 'real-time-prices':
       case 'realTimePrices':
-        data = await fetchFromErcotArchive(REPORT_IDS.realTimePrices, credentials);
+        // Try HTML page first (more reliable), fall back to archive API
+        try {
+          data = await fetchRealTimePricesHtml();
+          if (!data.prices || data.prices.length === 0) {
+            throw new Error('No prices from HTML');
+          }
+        } catch {
+          data = await fetchFromErcotArchive(REPORT_IDS.realTimePrices, credentials, parseSettlementPricesCsv);
+        }
         break;
       
       case 'day-ahead-prices':
       case 'dayAheadPrices':
-        data = await fetchFromErcotArchive(REPORT_IDS.dayAheadPrices, credentials);
+        data = await fetchFromErcotArchive(REPORT_IDS.dayAheadPrices, credentials, parseSettlementPricesCsv);
         break;
       
       case 'ancillary-services':
