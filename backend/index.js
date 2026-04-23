@@ -186,6 +186,76 @@ function parseSystemLoadCsv(csvData) {
   };
 }
 
+// Parse CSV data for fuel mix
+function parseFuelMixCsv(csvData) {
+  const lines = csvData.split('\n').filter(line => line.trim());
+  if (lines.length < 2) return { timestamp: new Date().toISOString(), fuels: [], total: 0 };
+  
+  // Parse headers
+  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+  
+  // Fuel type column name mappings
+  const fuelTypeMap = {
+    'Solar': 'Solar',
+    'SOLAR': 'Solar',
+    'Wind': 'Wind',
+    'WIND': 'Wind',
+    'Hydro': 'Hydro',
+    'HYDRO': 'Hydro',
+    'Nuclear': 'Nuclear',
+    'NUCLEAR': 'Nuclear',
+    'Coal': 'Coal',
+    'COAL': 'Coal',
+    'CoalAndLig': 'Coal',
+    'Coal and Lignite': 'Coal',
+    'Gas': 'Natural Gas',
+    'GAS': 'Natural Gas',
+    'Gas-CC': 'Natural Gas',
+    'GAS-CC': 'Natural Gas',
+    'Gas-GT': 'Natural Gas',
+    'Combined Cycle': 'Natural Gas',
+    'Natural Gas': 'Natural Gas',
+    'Other': 'Other',
+    'OTHER': 'Other',
+    'Storage': 'Storage',
+    'STORAGE': 'Storage',
+    'Power Storage': 'Storage',
+  };
+  
+  // Get the most recent data row
+  const lastRow = lines[lines.length - 1].split(',').map(v => v.trim().replace(/"/g, ''));
+  
+  // Aggregate fuel data
+  const fuelTotals = {};
+  
+  headers.forEach((header, i) => {
+    const normalizedType = fuelTypeMap[header];
+    if (normalizedType && lastRow[i]) {
+      const mw = parseFloat(lastRow[i]) || 0;
+      if (mw > 0) {
+        fuelTotals[normalizedType] = (fuelTotals[normalizedType] || 0) + mw;
+      }
+    }
+  });
+  
+  // Convert to array format
+  const fuels = Object.entries(fuelTotals)
+    .filter(([, mw]) => mw > 0)
+    .map(([type, mw]) => ({ type, mw: Math.round(mw) }));
+  
+  // Calculate total and percentages
+  const total = fuels.reduce((sum, f) => sum + f.mw, 0);
+  fuels.forEach(f => {
+    f.percentage = total > 0 ? Math.round((f.mw / total) * 100) : 0;
+  });
+  
+  return {
+    timestamp: new Date().toISOString(),
+    fuels,
+    total,
+  };
+}
+
 // Fetch real-time system conditions from ERCOT CDR (fallback for real-time data)
 async function fetchRealTimeConditions() {
   const response = await axios.get('https://www.ercot.com/content/cdr/html/real_time_system_conditions.html', {
@@ -225,6 +295,64 @@ async function fetchRealTimeConditions() {
   };
 }
 
+// Fetch fuel mix from ERCOT CDR HTML page
+async function fetchFuelMixHtml() {
+  const response = await axios.get('https://www.ercot.com/content/cdr/html/fuel_mix.html', {
+    timeout: 10000,
+  });
+  
+  const html = response.data;
+  
+  // Parse HTML table to extract fuel values
+  const getTableValue = (label) => {
+    // Match pattern: <td>Label</td><td>Value</td> or similar table structures
+    const patterns = [
+      new RegExp(`<td[^>]*>[^<]*${label}[^<]*</td>\\s*<td[^>]*>([\\d,.\\-]+)`, 'i'),
+      new RegExp(`${label}[^<]*</td>\\s*<td[^>]*>([\\d,.\\-]+)`, 'i'),
+      new RegExp(`<th[^>]*>[^<]*${label}[^<]*</th>\\s*<td[^>]*>([\\d,.\\-]+)`, 'i'),
+    ];
+    
+    for (const regex of patterns) {
+      const match = html.match(regex);
+      if (match) {
+        const val = match[1].trim().replace(/,/g, '');
+        const num = parseFloat(val);
+        return isNaN(num) ? null : num;
+      }
+    }
+    return null;
+  };
+  
+  // Try different label variations for each fuel type
+  const fuelData = {
+    'Solar': getTableValue('Solar') || getTableValue('SOLAR') || 0,
+    'Wind': getTableValue('Wind') || getTableValue('WIND') || 0,
+    'Hydro': getTableValue('Hydro') || getTableValue('HYDRO') || 0,
+    'Nuclear': getTableValue('Nuclear') || getTableValue('NUCLEAR') || 0,
+    'Coal': getTableValue('Coal') || getTableValue('COAL') || getTableValue('Lignite') || 0,
+    'Natural Gas': getTableValue('Gas') || getTableValue('GAS') || getTableValue('Natural Gas') || getTableValue('Combined Cycle') || 0,
+    'Other': getTableValue('Other') || getTableValue('OTHER') || 0,
+    'Storage': getTableValue('Storage') || getTableValue('STORAGE') || 0,
+  };
+  
+  // Convert to array format
+  const fuels = Object.entries(fuelData)
+    .filter(([, mw]) => mw > 0)
+    .map(([type, mw]) => ({ type, mw: Math.round(mw) }));
+  
+  // Calculate total and percentages
+  const total = fuels.reduce((sum, f) => sum + f.mw, 0);
+  fuels.forEach(f => {
+    f.percentage = total > 0 ? Math.round((f.mw / total) * 100) : 0;
+  });
+  
+  return {
+    timestamp: new Date().toISOString(),
+    fuels,
+    total,
+  };
+}
+
 // CORS headers
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -260,7 +388,8 @@ export const handler = async (event) => {
       
       case 'fuel-mix':
       case 'fuelMix':
-        data = await fetchFromErcotArchive(REPORT_IDS.fuelMix, credentials);
+        // Use HTML page which has actual fuel type breakdown
+        data = await fetchFuelMixHtml();
         break;
       
       case 'wind':

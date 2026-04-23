@@ -186,26 +186,60 @@ export const ercotApi = {
   },
 
   async getHubPrices() {
-    return fetchErcotHtml('hub_prices.html', parseHubPrices);
-  },
-
-  // Generation Data
-  async getGenerationByFuel() {
+    // Hub prices are part of real-time settlement point prices (HB_* points)
+    // Replicate getRealTimePrices logic to avoid 'this' context issues
+    let data;
     if (hasLambdaApi()) {
       try {
-        return await fetchFromLambda('fuel-mix');
+        data = await fetchFromLambda('real-time-prices');
       } catch (err) {
-        fallbackNotifier.notify({ message: err.message || 'Lambda API failed', endpoint: 'fuel-mix' });
+        fallbackNotifier.notify({ message: err.message || 'Lambda API failed', endpoint: 'real-time-prices' });
       }
     }
-    if (hasApiCredentials()) {
+    if (!data && hasApiCredentials()) {
       try {
-        return await fetchFromApi(`/archive/${REPORT_IDS.fuelMix}`);
+        data = await fetchFromApi(`/archive/${REPORT_IDS.realTimePrices}`);
       } catch {
         // Fallback
       }
     }
-    return fetchErcotHtml('fuel_mix.html', parseFuelMix);
+    if (!data) {
+      data = await fetchErcotHtml('real_time_spp.html', parseRealTimePrices);
+    }
+    
+    const hubPrices = (data.prices || []).filter(p => 
+      p.name?.startsWith('HB_') || p.name?.includes('HUB')
+    );
+    return {
+      timestamp: data.timestamp,
+      prices: hubPrices,
+    };
+  },
+
+  // Generation Data
+  async getGenerationByFuel() {
+    // ERCOT's fuel_mix.html endpoint no longer exists (404)
+    // Use system conditions data which has wind/solar, then estimate other fuels
+    if (hasLambdaApi()) {
+      try {
+        const data = await fetchFromLambda('fuel-mix');
+        // If Lambda returns proper fuel data, use it
+        if (data?.fuels && data.fuels.length > 0) {
+          return data;
+        }
+      } catch (err) {
+        fallbackNotifier.notify({ message: err.message || 'Lambda API failed', endpoint: 'fuel-mix' });
+      }
+    }
+    
+    // Fallback: derive fuel mix from system conditions
+    try {
+      const conditions = await ercotApi.getCurrentConditions();
+      return deriveFuelMixFromConditions(conditions);
+    } catch {
+      // Return empty data rather than failing silently
+      return { timestamp: new Date().toISOString(), fuels: [], total: 0 };
+    }
   },
 
   async getWindGeneration() {
@@ -264,7 +298,21 @@ export const ercotApi = {
   },
 
   async getWeatherZones() {
-    // Weather zones data is embedded in other endpoints
+    // Weather zones data is embedded in system conditions
+    if (hasLambdaApi()) {
+      try {
+        return await fetchFromLambda('system-conditions');
+      } catch (err) {
+        fallbackNotifier.notify({ message: err.message || 'Lambda API failed', endpoint: 'system-conditions' });
+      }
+    }
+    if (hasApiCredentials()) {
+      try {
+        return await fetchFromApi(`/archive/${REPORT_IDS.systemConditions}`);
+      } catch {
+        // Fallback to HTML parsing
+      }
+    }
     return fetchErcotHtml('real_time_system_conditions.html', parseSystemConditions);
   },
 
@@ -414,16 +462,160 @@ function parseFuelMix(html) {
   const doc = parseHtmlDoc(html);
   const getValue = (label) => extractTableValue(doc, label);
 
+  const fuelData = {
+    'Solar': getValue('Solar'),
+    'Wind': getValue('Wind'),
+    'Hydro': getValue('Hydro'),
+    'Nuclear': getValue('Nuclear'),
+    'Coal': getValue('Coal'),
+    'Natural Gas': getValue('Gas') || getValue('Natural Gas'),
+    'Other': getValue('Other'),
+    'Storage': getValue('Storage'),
+  };
+
+  // Convert to array format expected by charts
+  const fuels = Object.entries(fuelData)
+    .filter(([, mw]) => mw != null && mw > 0)
+    .map(([type, mw]) => ({ type, mw }));
+
+  // Calculate total and percentages
+  const total = fuels.reduce((sum, f) => sum + f.mw, 0);
+  fuels.forEach(f => {
+    f.percentage = total > 0 ? Math.round((f.mw / total) * 100) : 0;
+  });
+
   return {
     timestamp: new Date().toISOString(),
-    solar: getValue('Solar'),
-    wind: getValue('Wind'),
-    hydro: getValue('Hydro'),
-    nuclear: getValue('Nuclear'),
-    coal: getValue('Coal'),
-    naturalGas: getValue('Gas') || getValue('Natural Gas'),
-    other: getValue('Other'),
-    storage: getValue('Storage'),
+    fuels,
+    total,
+  };
+}
+
+// Derive approximate fuel mix from system conditions data
+// Used as fallback when fuel_mix.html is unavailable
+function deriveFuelMixFromConditions(conditions) {
+  const windOutput = conditions?.windOutput || 0;
+  const solarOutput = conditions?.solarOutput || 0;
+  const totalCapacity = conditions?.totalCapacity || conditions?.totalGeneration || 0;
+  
+  // Calculate remaining capacity after wind and solar
+  const remaining = Math.max(0, totalCapacity - windOutput - solarOutput);
+  
+  // ERCOT typical generation mix estimates (when detailed data unavailable):
+  // Nuclear: ~10-12% of total, Gas: ~40-50%, Coal: ~15-20%
+  // These are rough estimates based on ERCOT historical data
+  const nuclearEstimate = Math.round(totalCapacity * 0.11);
+  const coalEstimate = Math.round(remaining * 0.2);
+  const gasEstimate = Math.round(remaining - nuclearEstimate - coalEstimate);
+  
+  const fuels = [
+    { type: 'Wind', mw: Math.round(windOutput) },
+    { type: 'Solar', mw: Math.round(solarOutput) },
+    { type: 'Natural Gas', mw: Math.max(0, gasEstimate) },
+    { type: 'Nuclear', mw: nuclearEstimate },
+    { type: 'Coal', mw: coalEstimate },
+  ].filter(f => f.mw > 0);
+  
+  const total = fuels.reduce((sum, f) => sum + f.mw, 0);
+  fuels.forEach(f => {
+    f.percentage = total > 0 ? Math.round((f.mw / total) * 100) : 0;
+  });
+  
+  return {
+    timestamp: new Date().toISOString(),
+    fuels,
+    total,
+    estimated: true, // Flag to indicate data is estimated
+  };
+}
+
+// Transform raw ERCOT API fuel mix data to expected format
+function transformFuelMixData(rawData) {
+  // If already in expected format, return as-is
+  if (rawData?.fuels && Array.isArray(rawData.fuels)) {
+    return rawData;
+  }
+
+  // Map fuel type keys from API to display names
+  const fuelTypeMap = {
+    'SOLAR': 'Solar',
+    'WIND': 'Wind',
+    'HYDRO': 'Hydro',
+    'NUCLEAR': 'Nuclear',
+    'COAL': 'Coal',
+    'COALANDLIG': 'Coal',
+    'COAL AND LIGNITE': 'Coal',
+    'GAS': 'Natural Gas',
+    'GAS-CC': 'Natural Gas',
+    'GAS-GT': 'Natural Gas',
+    'CCGT': 'Natural Gas',
+    'COMBINED CYCLE': 'Natural Gas',
+    'NATURAL GAS': 'Natural Gas',
+    'OTHER': 'Other',
+    'STORAGE': 'Storage',
+    'POWER STORAGE': 'Storage',
+    'POWER_STORAGE': 'Storage',
+  };
+
+  const fuelTotals = {};
+
+  // Handle CSV string format (from Lambda API without parser)
+  if (typeof rawData === 'string' && rawData.includes(',')) {
+    const lines = rawData.split('\n').filter(line => line.trim());
+    if (lines.length >= 2) {
+      const headers = lines[0].split(',').map(h => h.trim().replaceAll('"', ''));
+      const lastRow = lines.at(-1).split(',').map(v => v.trim().replaceAll('"', ''));
+      
+      headers.forEach((header, i) => {
+        const upperHeader = header.toUpperCase();
+        const normalizedType = fuelTypeMap[upperHeader];
+        if (normalizedType && lastRow[i]) {
+          const mw = Number.parseFloat(lastRow[i]) || 0;
+          if (mw > 0) {
+            fuelTotals[normalizedType] = (fuelTotals[normalizedType] || 0) + mw;
+          }
+        }
+      });
+    }
+  } else {
+    // Handle ERCOT archive API format (array of records)
+    const records = rawData?.data || rawData?.archives || rawData || [];
+    
+    if (Array.isArray(records)) {
+      for (const record of records) {
+        const fuelType = record.fuelType || record.fuel || record.FUEL_TYPE || record.settlementPointType;
+        const mw = Number.parseFloat(record.genMw || record.gen || record.MW || record.generation || record.value || 0);
+        
+        if (fuelType && mw > 0) {
+          const normalizedType = fuelTypeMap[fuelType.toUpperCase()] || fuelType;
+          fuelTotals[normalizedType] = (fuelTotals[normalizedType] || 0) + mw;
+        }
+      }
+    } else if (typeof records === 'object') {
+      // Handle object format with fuel type keys
+      for (const [key, value] of Object.entries(records)) {
+        const normalizedType = fuelTypeMap[key.toUpperCase()] || key;
+        const mw = Number.parseFloat(value) || 0;
+        if (mw > 0) {
+          fuelTotals[normalizedType] = (fuelTotals[normalizedType] || 0) + mw;
+        }
+      }
+    }
+  }
+
+  const fuels = Object.entries(fuelTotals)
+    .filter(([, mw]) => mw > 0)
+    .map(([type, mw]) => ({ type, mw: Math.round(mw) }));
+
+  const total = fuels.reduce((sum, f) => sum + f.mw, 0);
+  fuels.forEach(f => {
+    f.percentage = total > 0 ? Math.round((f.mw / total) * 100) : 0;
+  });
+
+  return {
+    timestamp: new Date().toISOString(),
+    fuels,
+    total,
   };
 }
 
