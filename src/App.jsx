@@ -28,6 +28,10 @@ import MarketNotices from './pages/MarketNotices';
 import HistoricalData from './pages/HistoricalData';
 import Reports from './pages/Reports';
 
+// Developer Pages
+import ErrorInjector from './pages/ErrorInjector';
+import ApiExplorer from './pages/ApiExplorer';
+
 function App() {
   return (
     <Routes>
@@ -57,6 +61,9 @@ function App() {
         <Route path="market-notices" element={<MarketNotices />} />
         <Route path="historical-data" element={<HistoricalData />} />
         <Route path="reports" element={<Reports />} />
+        {/* Developer Routes */}
+        <Route path="dev/error-injector" element={<ErrorInjector />} />
+        <Route path="dev/api-explorer" element={<ApiExplorer />} />
       </Route>
     </Routes>
   );

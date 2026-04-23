@@ -1,5 +1,6 @@
 import { SSMClient, GetParametersCommand } from '@aws-sdk/client-ssm';
 import axios from 'axios';
+import AdmZip from 'adm-zip';
 
 // SSM Client
 const ssm = new SSMClient({ region: process.env.AWS_REGION });
@@ -101,10 +102,30 @@ async function downloadArchiveFile(downloadUrl, credentials) {
       'Ocp-Apim-Subscription-Key': credentials.subscriptionKey,
       'Accept': 'application/json,text/csv,application/xml,*/*',
     },
-    responseType: 'text',
+    responseType: 'arraybuffer',
   });
 
-  return response.data;
+  const buffer = Buffer.from(response.data);
+  
+  // Check if response is a ZIP file (starts with "PK" signature)
+  if (buffer[0] === 0x50 && buffer[1] === 0x4B) {
+    const zip = new AdmZip(buffer);
+    const entries = zip.getEntries();
+    
+    // Find CSV file in the archive
+    const csvEntry = entries.find(e => e.entryName.endsWith('.csv'));
+    if (csvEntry) {
+      return csvEntry.getData().toString('utf8');
+    }
+    
+    // If no CSV, return first file's content
+    if (entries.length > 0) {
+      return entries[0].getData().toString('utf8');
+    }
+  }
+  
+  // Not a ZIP, return as string
+  return buffer.toString('utf8');
 }
 
 // Fetch and parse data from ERCOT archive

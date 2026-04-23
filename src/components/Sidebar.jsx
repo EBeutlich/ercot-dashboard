@@ -67,6 +67,13 @@ const navItems = [
       { path: '/reports', label: 'Reports', icon: '📋' },
     ]
   },
+  {
+    category: 'Developer',
+    items: [
+      { path: '/dev/error-injector', label: 'Error Injector', icon: '🐛' },
+      { path: '/dev/api-explorer', label: 'API Explorer', icon: '🔌' },
+    ]
+  },
 ];
 
 function Sidebar() {
