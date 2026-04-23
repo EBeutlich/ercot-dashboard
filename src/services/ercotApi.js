@@ -33,6 +33,8 @@ const ERCOT_PUBLIC_BASE = 'https://www.ercot.com/content/cdr/html';
 const CORS_PROXIES = [
   'https://api.allorigins.win/raw?url=',
   'https://corsproxy.io/?',
+  'https://api.codetabs.com/v1/proxy?quest=',
+  'https://thingproxy.freeboard.io/fetch/',
 ];
 
 // Check if Lambda API is configured (preferred)
@@ -272,7 +274,15 @@ export const ercotApi = {
   },
 
   async getAncillaryServices() {
-    return fetchErcotHtml('as_capacity_monitor.html', parseAncillaryServices);
+    if (hasLambdaApi()) {
+      try {
+        return await fetchFromLambda('ancillary-services');
+      } catch (err) {
+        fallbackNotifier.notify({ message: err.message || 'Lambda API failed', endpoint: 'ancillary-services' });
+      }
+    }
+    // Fallback to real-time conditions which includes AS data
+    return fetchErcotHtml('real_time_system_conditions.html', parseAncillaryServices);
   },
 
   async getTransmissionConstraints() {

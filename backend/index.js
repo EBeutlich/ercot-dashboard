@@ -23,6 +23,7 @@ const REPORT_IDS = {
   loadForecast: 'NP3-566-CD',
   realTimePrices: 'NP6-788-CD',
   dayAheadPrices: 'NP4-191-CD',
+  ancillaryServices: 'NP3-911-ER', // AS Capacity Monitor
 };
 
 // Fetch credentials from SSM Parameter Store
@@ -292,6 +293,11 @@ export const handler = async (event) => {
         data = await fetchFromErcotArchive(REPORT_IDS.dayAheadPrices, credentials);
         break;
       
+      case 'ancillary-services':
+      case 'ancillaryServices':
+        data = await fetchRealTimeConditions(); // AS data included in real-time conditions
+        break;
+      
       default:
         return {
           statusCode: 404,
@@ -307,6 +313,7 @@ export const handler = async (event) => {
               'actual-load',
               'real-time-prices',
               'day-ahead-prices',
+              'ancillary-services',
             ],
           }),
         };
