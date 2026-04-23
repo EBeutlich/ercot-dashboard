@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { fallbackNotifier } from './fallbackNotifier';
 
 // Lambda API Configuration (recommended for production)
 // Set VITE_ERCOT_API_URL to your Lambda API Gateway endpoint after deployment
@@ -111,8 +112,8 @@ export const ercotApi = {
     if (hasLambdaApi()) {
       try {
         return await fetchFromLambda('system-conditions');
-      } catch {
-        // Fall through to other methods
+      } catch (err) {
+        fallbackNotifier.notify({ message: err.message || 'Lambda API failed', endpoint: 'system-conditions' });
       }
     }
     // Priority 2: Direct API (credentials in browser - not recommended)
@@ -131,8 +132,8 @@ export const ercotApi = {
     if (hasLambdaApi()) {
       try {
         return await fetchFromLambda('system-conditions');
-      } catch {
-        // Fall through
+      } catch (err) {
+        fallbackNotifier.notify({ message: err.message || 'Lambda API failed', endpoint: 'system-conditions' });
       }
     }
     if (hasApiCredentials()) {
@@ -150,8 +151,8 @@ export const ercotApi = {
     if (hasLambdaApi()) {
       try {
         return await fetchFromLambda('real-time-prices');
-      } catch {
-        // Fall through
+      } catch (err) {
+        fallbackNotifier.notify({ message: err.message || 'Lambda API failed', endpoint: 'real-time-prices' });
       }
     }
     if (hasApiCredentials()) {
@@ -168,8 +169,8 @@ export const ercotApi = {
     if (hasLambdaApi()) {
       try {
         return await fetchFromLambda('day-ahead-prices');
-      } catch {
-        // Fall through
+      } catch (err) {
+        fallbackNotifier.notify({ message: err.message || 'Lambda API failed', endpoint: 'day-ahead-prices' });
       }
     }
     if (hasApiCredentials()) {
@@ -191,8 +192,8 @@ export const ercotApi = {
     if (hasLambdaApi()) {
       try {
         return await fetchFromLambda('fuel-mix');
-      } catch {
-        // Fall through
+      } catch (err) {
+        fallbackNotifier.notify({ message: err.message || 'Lambda API failed', endpoint: 'fuel-mix' });
       }
     }
     if (hasApiCredentials()) {
@@ -209,8 +210,8 @@ export const ercotApi = {
     if (hasLambdaApi()) {
       try {
         return await fetchFromLambda('wind');
-      } catch {
-        // Fall through
+      } catch (err) {
+        fallbackNotifier.notify({ message: err.message || 'Lambda API failed', endpoint: 'wind' });
       }
     }
     if (hasApiCredentials()) {
@@ -227,8 +228,8 @@ export const ercotApi = {
     if (hasLambdaApi()) {
       try {
         return await fetchFromLambda('solar');
-      } catch {
-        // Fall through
+      } catch (err) {
+        fallbackNotifier.notify({ message: err.message || 'Lambda API failed', endpoint: 'solar' });
       }
     }
     if (hasApiCredentials()) {
@@ -246,8 +247,8 @@ export const ercotApi = {
     if (hasLambdaApi()) {
       try {
         return await fetchFromLambda('load-forecast');
-      } catch {
-        // Fall through
+      } catch (err) {
+        fallbackNotifier.notify({ message: err.message || 'Lambda API failed', endpoint: 'load-forecast' });
       }
     }
     if (hasApiCredentials()) {
